@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>AI Study Teacher</title>
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+<div class="app">
+    <header class="header">
+        <div>
+            <h1>📚 AI Study Teacher By kundan</h1>
+            <p>
+                Upload your PDF, let AI understand it, explain like a teacher
+                and read it out loud.
+            </p>
+        </div>
+    </header>
+
+    <main class="main">
+        <!-- LEFT PANEL -->
+        <section class="panel left">
+            <h2>1. Upload PDF</h2>
+            <form id="pdfForm" method="post" enctype="multipart/form-data">
+                <label class="file-label">
+                    <span>Choose a PDF file</span>
+                    <input type="file" id="fileInput" name="fileInput"
+                            accept="application/pdf, image/png, image/jpeg, image/jpg" required />
+                </label>
+                <button type="submit" class="btn primary">Extract Text</button>
+            </form>
+
+            <h2>2. Voice Settings</h2>
+            <div class="control-group">
+                <label for="voiceSelect">Voice (male/female/system):</label>
+                <select id="voiceSelect"></select>
+            </div>
+
+            <div class="control-group">
+                <label for="rateRange">Speed:</label>
+                <input type="range" id="rateRange" min="0.7" max="1.5" step="0.05" value="1" />
+                <span id="rateValue">1.0x</span>
+            </div>
+
+            <div class="control-group">
+                <label for="pitchRange">Pitch:</label>
+                <input type="range" id="pitchRange" min="0.7" max="1.5" step="0.05" value="1" />
+                <span id="pitchValue">1.0x</span>
+            </div>
+
+            <h2>3. Reading Mode</h2>
+            <div class="buttons">
+                <button type="button" id="readAllBtn" class="btn secondary">
+                    🔊 Read All
+                </button>
+                <button type="button" id="readSelectedBtn" class="btn secondary">
+                    🎧 Read Selected
+                </button>
+                <button type="button" id="teacherModeBtn" class="btn accent">
+                    📖 Topic-wise Read
+                </button>
+                <button type="button" id="stopBtn" class="btn danger">
+                    ⏹ Stop
+                </button>
+            </div>
+
+            <p class="hint">
+                Tip: select a paragraph in the text area and click
+                <b>Read Selected</b>. Topic-wise read tries to read heading by
+                heading.
+            </p>
+        </section>
+
+        <!-- RIGHT PANEL -->
+        <section class="panel right">
+            <h2>Extracted Text</h2>
+            <textarea id="textArea" placeholder="Extracted PDF text will appear here..."></textarea>
+
+            <h2>AI Teacher (Explain / Answer)</h2>
+
+            <textarea
+                id="questionInput"
+                placeholder="Type your doubt here (optional).
+If empty, AI will just explain the selected topic or the whole PDF."
+            ></textarea>
+
+            <div class="buttons" style="margin-top: 6px;">
+                <button type="button" id="askTeacherBtn" class="btn accent">
+                    👨‍🏫 Ask AI Teacher
+                </button>
+                <button type="button" id="readTeacherAnswerBtn" class="btn secondary">
+                    🔊 Read Answer
+                </button>
+            </div>
+
+            <pre id="teacherAnswer" class="teacher-answer">
+AI teacher's explanation will appear here...
+            </pre>
+        </section>
+    </main>
+</div>
+
+<script>
+    console.log("✅ Script loaded");
+
+    // ========== VOICE SETUP ==========
+    let voices = [];
+    const voiceSelect = document.getElementById("voiceSelect");
+    const rateRange = document.getElementById("rateRange");
+    const pitchRange = document.getElementById("pitchRange");
+    const rateValue = document.getElementById("rateValue");
+    const pitchValue = document.getElementById("pitchValue");
+
+    function loadVoices() {
+        voices = window.speechSynthesis.getVoices();
+        voiceSelect.innerHTML = "";
+
+        voices.forEach((voice, index) => {
+            const option = document.createElement("option");
+            option.value = index;
+            option.textContent =
+                voice.name +
+                " (" +
+                voice.lang +
+                ")" +
+                (voice.default ? " - DEFAULT" : "");
+            voiceSelect.appendChild(option);
+        });
+    }
+
+    if (typeof window.speechSynthesis !== "undefined") {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+        loadVoices();
+    }
+
+    rateRange.addEventListener("input", () => {
+        rateValue.textContent = rateRange.value + "x";
+    });
+
+    pitchRange.addEventListener("input", () => {
+        pitchValue.textContent = pitchRange.value + "x";
+    });
+
+    function speakChunk(text) {
+        if (!text || typeof window.speechSynthesis === "undefined") return;
+
+        const utt = new SpeechSynthesisUtterance(text);
+
+        const selectedIndex = voiceSelect.value;
+        if (voices[selectedIndex]) {
+            utt.voice = voices[selectedIndex];
+        }
+
+        utt.rate = parseFloat(rateRange.value);
+        utt.pitch = parseFloat(pitchRange.value);
+
+        window.speechSynthesis.speak(utt);
+    }
+
+    function stopSpeaking() {
+        if (typeof window.speechSynthesis !== "undefined") {
+            window.speechSynthesis.cancel();
+        }
+    }
+
+    // ========== TOPIC SPLIT FOR TOPIC-WISE READ ==========
+    function splitIntoTopics(text) {
+        const lines = text.split(/\r?\n/);
+        const topics = [];
+        let currentTitle = null;
+        let currentBody = [];
+
+        function pushCurrent() {
+            if (currentTitle || currentBody.length > 0) {
+                topics.push({
+                    title: currentTitle || "Topic",
+                    body: currentBody.join(" ").trim()
+                });
+            }
+            currentTitle = null;
+            currentBody = [];
+        }
+
+        for (let line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+
+            const isTitle =
+                trimmed.length < 60 &&
+                (trimmed.endsWith(":") || trimmed === trimmed.toUpperCase());
+
+            if (isTitle) {
+                pushCurrent();
+                currentTitle = trimmed.replace(/:$/, "");
+            } else {
+                currentBody.push(trimmed);
+            }
+        }
+        pushCurrent();
+        return topics;
+    }
+
+    function teacherReadOriginal(text) {
+        stopSpeaking();
+
+        const topics = splitIntoTopics(text);
+        if (topics.length === 0) {
+            speakChunk(
+                "I could not detect clear topics. I will read the content normally."
+            );
+            speakChunk(text);
+            return;
+        }
+
+        topics.forEach((topic, i) => {
+            speakChunk("Now we will learn about: " + topic.title + ".");
+            if (topic.body) {
+                speakChunk("Explanation:");
+                speakChunk(topic.body);
+            }
+            if (i !== topics.length - 1) {
+                speakChunk("Let's move to the next topic.");
+            }
+        });
+    }
+
+    // ========== PDF UPLOAD ==========
+    const pdfForm = document.getElementById("pdfForm");
+    const textArea = document.getElementById("textArea");
+    const questionInput = document.getElementById("questionInput");
+    const teacherAnswerEl = document.getElementById("teacherAnswer");
+    const askTeacherBtn = document.getElementById("askTeacherBtn");
+    const readTeacherAnswerBtn = document.getElementById("readTeacherAnswerBtn");
+
+    pdfForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        console.log("📤 PDF form submitted via JS");
+
+        const fileInput = document.getElementById("fileInput");
+        if (fileInput.files.length === 0) {
+            alert("Please select a PDF file first.");
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append("fileInput", fileInput.files[0]);
+
+        textArea.value = "Extracting text from PDF...";
+
+        try {
+            const res = await fetch("/extract", {
+                method: "POST",
+                body: formData
+            });
+
+            const data = await res.json();
+
+            if (data.error) {
+                alert("Server error: " + data.error);
+                textArea.value = "";
+            } else {
+                textArea.value = data.text;
+                console.log("✅ Text extracted, length:", data.text.length);
+            }
+        } catch (err) {
+            console.error("Fetch /extract failed:", err);
+            alert("Fetch /extract failed: " + err);
+            textArea.value = "";
+        }
+    });
+
+    // ========== BASIC READING BUTTONS ==========
+    document.getElementById("readAllBtn").addEventListener("click", () => {
+        const text = textArea.value.trim();
+        if (!text) {
+            alert("No text to read. Upload a PDF first.");
+            return;
+        }
+
+        stopSpeaking();
+
+        const words = text.split(/\s+/);
+        let chunk = [];
+
+        words.forEach((w) => {
+            chunk.push(w);
+            if (chunk.join(" ").length > 400) {
+                speakChunk(chunk.join(" "));
+                chunk = [];
+            }
+        });
+
+        if (chunk.length) {
+            speakChunk(chunk.join(" "));
+        }
+    });
+
+    document.getElementById("readSelectedBtn").addEventListener("click", () => {
+        const start = textArea.selectionStart;
+        const end = textArea.selectionEnd;
+
+        if (start === end) {
+            alert("Select some text in the box first.");
+            return;
+        }
+
+        const selected = textArea.value.substring(start, end).trim();
+        if (!selected) {
+            alert("Selected text is empty.");
+            return;
+        }
+
+        stopSpeaking();
+        speakChunk(selected);
+    });
+
+    document.getElementById("teacherModeBtn").addEventListener("click", () => {
+        const text = textArea.value.trim();
+        if (!text) {
+            alert("No text to read. Upload a PDF first.");
+            return;
+        }
+        teacherReadOriginal(text);
+    });
+
+    document.getElementById("stopBtn").addEventListener("click", () => {
+        stopSpeaking();
+    });
+
+    // ========== AI TEACHER (GEMINI) ==========
+    askTeacherBtn.addEventListener("click", async () => {
+        const fullText = textArea.value.trim();
+        if (!fullText) {
+            alert("Upload a PDF first so the AI teacher has something to read.");
+            return;
+        }
+
+        const start = textArea.selectionStart;
+        const end = textArea.selectionEnd;
+        const selected =
+            start !== end ? textArea.value.substring(start, end).trim() : "";
+
+        const question = questionInput.value.trim();
+
+        teacherAnswerEl.textContent = "AI teacher is thinking...";
+
+        try {
+            const res = await fetch("/teach", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    context: fullText,
+                    selected: selected,
+                    question: question
+                })
+            });
+
+            const data = await res.json();
+
+            if (data.error) {
+                teacherAnswerEl.textContent = "Error: " + data.error;
+                alert("Server error: " + data.error);
+                return;
+            }
+
+            teacherAnswerEl.textContent =
+                data.answer || "No answer received from AI teacher.";
+            stopSpeaking();
+            speakChunk(teacherAnswerEl.textContent);
+        } catch (err) {
+            console.error("Fetch /teach failed:", err);
+            teacherAnswerEl.textContent = "Error calling AI teacher: " + err;
+            alert("Fetch /teach failed: " + err);
+        }
+    });
+
+    readTeacherAnswerBtn.addEventListener("click", () => {
+        const txt = teacherAnswerEl.textContent.trim();
+        if (!txt || txt.startsWith("AI teacher's explanation")) {
+            alert("No teacher answer yet. Ask AI Teacher first.");
+            return;
+        }
+        stopSpeaking();
+        speakChunk(txt);
+    });
+</script>
+</body>
+</html>
