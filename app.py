@@ -75,12 +75,8 @@ def clean_ai_text(raw: str) -> str:
 
 app = Flask(__name__)
 
-# Try env var first
-GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
-
-# Fallback: direct key in code (local only – do NOT upload to GitHub)
-if not GEMINI_KEY:
-    GEMINI_KEY = "AIzaSyB668g2x1jVvPMMFCnRClEXMKTLz4XALCA"  # <- your key
+# Direct key in code
+GEMINI_KEY = "Example_Key"  # <- your key
 
 genai.configure(api_key=GEMINI_KEY)
 
@@ -154,35 +150,58 @@ def extract():
     Takes a PDF or image upload and returns extracted text as JSON.
     Accepts: PDF, JPG, PNG.
     """
-    # handle both old name "pdf" and new "fileInput"
-    uploaded = None
-    if "fileInput" in request.files:
-        uploaded = request.files["fileInput"]
-    elif "pdf" in request.files:
-        uploaded = request.files["pdf"]
-
-    if not uploaded:
-        return jsonify({"error": "No file uploaded"}), 400
-
-    if uploaded.filename == "":
-        return jsonify({"error": "No file selected"}), 400
-
-    filename = uploaded.filename.lower()
-
     try:
+        # handle both old name "pdf" and new "fileInput"
+        uploaded = None
+        if "fileInput" in request.files:
+            uploaded = request.files["fileInput"]
+        elif "pdf" in request.files:
+            uploaded = request.files["pdf"]
+
+        if not uploaded:
+            print("❌ No file uploaded")
+            return jsonify({"error": "No file uploaded"}), 400
+
+        if uploaded.filename == "":
+            print("❌ No file selected")
+            return jsonify({"error": "No file selected"}), 400
+
+        filename = uploaded.filename.lower()
+        print(f"📄 Processing file: {uploaded.filename}")
+
+        # Validate file size (max 50MB)
+        uploaded.seek(0, 2)  # Seek to end
+        file_size = uploaded.tell()
+        uploaded.seek(0)  # Reset to beginning
+        
+        max_size = 50 * 1024 * 1024  # 50MB
+        if file_size > max_size:
+            print(f"❌ File too large: {file_size} bytes")
+            return jsonify({"error": "File too large. Maximum size is 50MB"}), 400
+
+        # Extract text based on file type
         if filename.endswith(".pdf"):
+            print("🔍 Extracting text from PDF...")
             text = extract_text_from_pdf(uploaded, max_pages=None)
         elif filename.endswith((".jpg", ".jpeg", ".png")):
+            print("🔍 Extracting text from image...")
             text = extract_text_from_image(uploaded)
         else:
-            return jsonify({"error": "Unsupported file type"}), 400
+            print(f"❌ Unsupported file type: {filename}")
+            return jsonify({"error": "Unsupported file type. Please upload PDF, JPG, or PNG"}), 400
 
         if not text or not text.strip():
-            return jsonify({"error": "Could not extract text from this file"}), 400
+            print("❌ No text extracted from file")
+            return jsonify({"error": "Could not extract text from this file. The file may be empty or corrupted."}), 400
 
-        return jsonify({"success": True, "text": text})
+        print(f"✅ Successfully extracted {len(text)} characters")
+        return jsonify({"success": True, "text": text}), 200
+        
     except Exception as e:
-        return jsonify({"error": f"Error processing file: {e}"}), 500
+        print(f"❌ Error processing file: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"Error processing file: {str(e)}"}), 500
 
 
 @app.route("/teach", methods=["POST"])
@@ -245,7 +264,7 @@ INSTRUCTION:
 """
 
     try:
-        model = genai.GenerativeModel("gemini-2.5-flash-lite")
+        model = genai.GenerativeModel("gemini-2.5-flash")
         response = model.generate_content(prompt)
 
         raw = (response.text or "").strip()
@@ -260,6 +279,9 @@ INSTRUCTION:
         return jsonify({"success": True, "answer": answer})
 
     except Exception as e:
+        print(f"❌ Gemini AI Teacher error: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": f"Gemini AI Teacher error: {e}"}), 500
 
 
